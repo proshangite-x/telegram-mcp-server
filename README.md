@@ -64,7 +64,8 @@ Add to your MCP settings (`.cursor/mcp.json` or Claude config):
   "mcpServers": {
     "telegram": {
       "command": "python",
-      "args": ["c:/Telegram-MCP Server/server.py"],
+      "args": ["server.py"],
+      "cwd": "/path/to/telegram-mcp-server",
       "env": {
         "TELEGRAM_BOT_TOKEN": "your_token_here",
         "DEFAULT_CHAT_ID": "your_chat_id_here"

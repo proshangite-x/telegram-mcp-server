@@ -27,6 +27,7 @@ from typing import Any
 import aiohttp
 import telegram
 import telegram.error
+from telegram import ReplyParameters
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
@@ -220,7 +221,7 @@ async def reply_to_message(
         msg = await bot.send_message(
             chat_id=cid,
             text=text,
-            reply_to_message_id=message_id,
+            reply_parameters=ReplyParameters(message_id=message_id),
             parse_mode=pm,
         )
         return _ok({
