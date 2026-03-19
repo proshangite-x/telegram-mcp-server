@@ -5,10 +5,12 @@ A high-performance MCP (Model Context Protocol) server that exposes Telegram Bot
 functionality as tools for LLM agents (Cursor, Claude Desktop, etc.).
 
 Tools provided:
-  Messaging:   send_message, reply_to_message, edit_message, delete_message
-  Files/Media: send_document, send_photo, send_video, download_file, get_file_link
-  Management:  create_group, create_channel, add_member, kick_member, pin_message
-  Information: get_me, get_updates, get_chat_id
+  Messaging:    send_message, reply_to_message, edit_message, delete_message, forward_message
+  Files/Media:  send_document, send_photo, send_video, send_audio, send_voice,
+                download_file, get_file_link
+  Interactive:  send_poll
+  Management:   create_group, create_channel, create_invite_link, kick_member, pin_message
+  Information:  get_me, get_updates, get_chat_id, get_chat_info
 
 Requires:
   - TELEGRAM_BOT_TOKEN  (env var or .env file)
@@ -17,10 +19,12 @@ Requires:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +32,7 @@ import aiohttp
 import telegram
 import telegram.error
 from telegram import ReplyParameters
+from telegram.request import HTTPXRequest
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
@@ -56,6 +61,69 @@ BOT_API_UPLOAD_HARD = 2000 * 1024 * 1024     # ~2 GB – absolute maximum
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Rate limiter
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class _RateLimiter:
+    """Proactive rate limiter for Telegram Bot API.
+
+    Telegram enforces:
+      - ~30 messages/second globally
+      - ~20 messages/minute per chat (1 msg per 3 seconds in groups)
+
+    This class tracks timestamps and sleeps *before* sending when the
+    caller is about to exceed the limits, avoiding 429 errors.
+    """
+
+    GLOBAL_PER_SECOND = 30
+    PER_CHAT_PER_MINUTE = 20
+    PER_CHAT_INTERVAL = 60.0 / PER_CHAT_PER_MINUTE  # 3 seconds
+
+    def __init__(self) -> None:
+        self._global_timestamps: list[float] = []
+        self._chat_timestamps: dict[str, list[float]] = {}
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, chat_id: str | None = None) -> None:
+        """Wait if necessary to stay within Telegram rate limits."""
+        async with self._lock:
+            now = time.monotonic()
+
+            # ── Global limit: 30 msg/sec ──
+            self._global_timestamps = [
+                t for t in self._global_timestamps if now - t < 1.0
+            ]
+            if len(self._global_timestamps) >= self.GLOBAL_PER_SECOND:
+                wait = 1.0 - (now - self._global_timestamps[0])
+                if wait > 0:
+                    logger.debug("Rate limiter: global throttle %.2fs", wait)
+                    await asyncio.sleep(wait)
+                    now = time.monotonic()
+
+            self._global_timestamps.append(now)
+
+            # ── Per-chat limit: 20 msg/min ──
+            if chat_id:
+                cid = str(chat_id)
+                if cid not in self._chat_timestamps:
+                    self._chat_timestamps[cid] = []
+                self._chat_timestamps[cid] = [
+                    t for t in self._chat_timestamps[cid] if now - t < 60.0
+                ]
+                if len(self._chat_timestamps[cid]) >= self.PER_CHAT_PER_MINUTE:
+                    wait = 60.0 - (now - self._chat_timestamps[cid][0])
+                    if wait > 0:
+                        logger.debug("Rate limiter: per-chat throttle %.2fs for %s", wait, cid)
+                        await asyncio.sleep(wait)
+                        now = time.monotonic()
+
+                self._chat_timestamps[cid].append(now)
+
+
+_rate_limiter = _RateLimiter()
+
+# ──────────────────────────────────────────────────────────────────────────────
 # FastMCP server instance
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -69,14 +137,19 @@ mcp = FastMCP(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Lazy bot singleton
+# Lazy bot singleton (with custom HTTP pool)
 # ──────────────────────────────────────────────────────────────────────────────
 
 _bot: telegram.Bot | None = None
 
 
 def _get_bot() -> telegram.Bot:
-    """Return the shared Bot instance, creating it on first call."""
+    """Return the shared Bot instance, creating it on first call.
+
+    Uses a custom HTTPXRequest with an optimised connection pool
+    (100 connections, 60 s read timeout) to handle heavy usage without
+    hitting default-pool exhaustion.
+    """
     global _bot
     if _bot is None:
         if not TELEGRAM_BOT_TOKEN:
@@ -84,8 +157,15 @@ def _get_bot() -> telegram.Bot:
                 "TELEGRAM_BOT_TOKEN is not set. "
                 "Add it to your .env file or export it as an environment variable."
             )
-        _bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
-        logger.info("Bot instance created")
+        request = HTTPXRequest(
+            connection_pool_size=100,
+            read_timeout=60,
+            write_timeout=60,
+            connect_timeout=15,
+            pool_timeout=15,
+        )
+        _bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN, request=request)
+        logger.info("Bot instance created (pooled HTTP client)")
     return _bot
 
 
@@ -183,6 +263,7 @@ async def send_message(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         pm = parse_mode if parse_mode else None
         msg = await bot.send_message(chat_id=cid, text=text, parse_mode=pm)
         return _ok({
@@ -217,6 +298,7 @@ async def reply_to_message(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         pm = parse_mode if parse_mode else None
         msg = await bot.send_message(
             chat_id=cid,
@@ -257,6 +339,7 @@ async def edit_message(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         pm = parse_mode if parse_mode else None
         msg = await bot.edit_message_text(
             chat_id=cid,
@@ -295,6 +378,7 @@ async def delete_message(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         result = await bot.delete_message(chat_id=cid, message_id=message_id)
         return _ok({"deleted": result, "message_id": message_id})
     except Exception as e:
@@ -323,6 +407,7 @@ async def forward_message(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         msg = await bot.forward_message(
             chat_id=cid,
             from_chat_id=from_chat_id,
@@ -369,6 +454,7 @@ async def send_document(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         path = _validate_file(file_path, "Document")
         warning = _check_file_size(path)
         pm = parse_mode if parse_mode else None
@@ -420,6 +506,7 @@ async def send_photo(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         path = _validate_file(photo_path, "Photo")
         warning = _check_file_size(path)
         pm = parse_mode if parse_mode else None
@@ -472,6 +559,7 @@ async def send_video(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         path = _validate_file(video_path, "Video")
         warning = _check_file_size(path)
         pm = parse_mode if parse_mode else None
@@ -597,6 +685,7 @@ async def send_audio(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         path = _validate_file(audio_path, "Audio")
         warning = _check_file_size(path)
         pm = parse_mode if parse_mode else None
@@ -650,6 +739,7 @@ async def send_voice(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         path = _validate_file(voice_path, "Voice")
         warning = _check_file_size(path)
         pm = parse_mode if parse_mode else None
@@ -707,6 +797,7 @@ async def send_poll(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
 
         if len(options) < 2:
             raise ValueError("A poll requires at least 2 options.")
@@ -859,6 +950,7 @@ async def create_invite_link(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         invite = await bot.create_chat_invite_link(
             chat_id=cid,
             member_limit=1,
@@ -894,6 +986,7 @@ async def kick_member(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         result = await bot.ban_chat_member(chat_id=cid, user_id=user_id)
         return _ok({
             "banned": result,
@@ -926,6 +1019,7 @@ async def pin_message(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         result = await bot.pin_chat_message(
             chat_id=cid,
             message_id=message_id,
@@ -1117,6 +1211,7 @@ async def get_chat_info(
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
+        await _rate_limiter.acquire(cid)
         chat = await bot.get_chat(chat_id=cid)
 
         result: dict[str, Any] = {
