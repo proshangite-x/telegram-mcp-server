@@ -626,23 +626,23 @@ async def create_channel(
 
 
 @mcp.tool()
-async def add_member(
+async def create_invite_link(
     user_id: int,
     chat_id: str | None = None,
 ) -> str:
-    """Add a user to a group or channel by creating an invite link.
+    """Create a one-time invite link for a group or channel.
 
-    Since bots cannot directly add users, this creates a one‑time invite link
-    that can be shared with the user to join.
+    Bots cannot directly add users to chats. This tool generates a single-use
+    invite link that you can share with the target user so they can join.
 
     Args:
-        user_id: The Telegram user ID (used for context; the invite link is for anyone).
+        user_id: The Telegram user ID (used for labelling the invite; the link works for anyone).
         chat_id: Group/channel ID. Omit to use DEFAULT_CHAT_ID.
 
     Returns:
         JSON with the generated invite link.
     """
-    logger.info("add_member → chat=%s, user=%d", chat_id, user_id)
+    logger.info("create_invite_link → chat=%s, user=%d", chat_id, user_id)
     try:
         bot = _get_bot()
         cid = _resolve_chat_id(chat_id)
