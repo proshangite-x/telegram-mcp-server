@@ -3,7 +3,20 @@ name = "telegram-mcp-server"
 version = "1.1.0"
 description = "High-performance MCP server for Telegram Bot API integration"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+keywords = ["mcp", "telegram", "bot", "llm", "agent", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "mcp[cli]>=1.2.0",
     "python-telegram-bot>=21.0",
@@ -17,6 +30,12 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.3.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/proshangite-x/telegram-mcp-server"
+Repository = "https://github.com/proshangite-x/telegram-mcp-server"
+Issues = "https://github.com/proshangite-x/telegram-mcp-server/issues"
+Changelog = "https://github.com/proshangite-x/telegram-mcp-server/blob/main/CHANGELOG.md"
 
 [project.scripts]
 telegram-mcp = "server:main"

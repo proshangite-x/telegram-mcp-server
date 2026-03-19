@@ -1,26 +1,36 @@
-# === Secrets ===
+# Secrets
 .env
 
-# === Python ===
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.egg-info/
+*.egg
 dist/
 build/
-*.egg
 
-# === Virtual Environments ===
+# Virtual environments
 venv/
 .venv/
 env/
 
-# === IDE ===
+# Testing & linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# === OS ===
+# OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
