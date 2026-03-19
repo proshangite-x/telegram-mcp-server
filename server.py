@@ -85,7 +85,7 @@ def _get_bot() -> telegram.Bot:
                 "Add it to your .env file or export it as an environment variable."
             )
         _bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
-        logger.info("Bot instance created (token …%s)", TELEGRAM_BOT_TOKEN[-6:])
+        logger.info("Bot instance created")
     return _bot
 
 
@@ -518,12 +518,16 @@ async def get_file_link(file_id: str) -> str:
     try:
         bot = _get_bot()
         tg_file = await bot.get_file(file_id)
+        download_url = (
+            tg_file.file_path
+            if tg_file.file_path.startswith("http")
+            else f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{tg_file.file_path}"
+        )
         return _ok({
             "file_id": file_id,
             "file_path": tg_file.file_path,
-            "download_url": tg_file.file_path
-            if tg_file.file_path.startswith("http")
-            else f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{tg_file.file_path}",
+            "download_url": download_url,
+            "warning": "This URL contains your bot token. Do NOT share it publicly.",
         })
     except Exception as e:
         return await _handle_telegram_error(e)
