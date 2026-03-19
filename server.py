@@ -301,6 +301,44 @@ async def delete_message(
         return await _handle_telegram_error(e)
 
 
+@mcp.tool()
+async def forward_message(
+    from_chat_id: str,
+    message_id: int,
+    chat_id: str | None = None,
+) -> str:
+    """Forward a message from one chat to another.
+
+    Forwards the message with its original sender info intact.
+
+    Args:
+        from_chat_id: The chat where the original message exists.
+        message_id: The ID of the message to forward.
+        chat_id: Destination chat ID. Omit to use DEFAULT_CHAT_ID.
+
+    Returns:
+        JSON with the forwarded message details.
+    """
+    logger.info("forward_message → from=%s, msg=%d, to=%s", from_chat_id, message_id, chat_id)
+    try:
+        bot = _get_bot()
+        cid = _resolve_chat_id(chat_id)
+        msg = await bot.forward_message(
+            chat_id=cid,
+            from_chat_id=from_chat_id,
+            message_id=message_id,
+        )
+        return _ok({
+            "message_id": msg.message_id,
+            "chat_id": msg.chat.id,
+            "date": msg.date.isoformat(),
+            "forward_from_chat": from_chat_id,
+            "original_message_id": message_id,
+        })
+    except Exception as e:
+        return await _handle_telegram_error(e)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  2. FILE & MEDIA TOOLS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -528,6 +566,177 @@ async def get_file_link(file_id: str) -> str:
             "file_path": tg_file.file_path,
             "download_url": download_url,
             "warning": "This URL contains your bot token. Do NOT share it publicly.",
+        })
+    except Exception as e:
+        return await _handle_telegram_error(e)
+
+
+@mcp.tool()
+async def send_audio(
+    audio_path: str,
+    chat_id: str | None = None,
+    caption: str | None = None,
+    parse_mode: str = "HTML",
+) -> str:
+    """Send an audio file to a Telegram chat.
+
+    Telegram treats audio files (MP3, M4A, etc.) specially — they appear with
+    a built-in player, album art, title, and performer info.
+    For raw audio without the player UI, use send_voice instead.
+
+    Args:
+        audio_path: Local path to the audio file.
+        chat_id: Target chat ID. Omit to use DEFAULT_CHAT_ID.
+        caption: Optional caption (supports HTML by default).
+        parse_mode: Formatting for the caption.
+
+    Returns:
+        JSON with audio details (file_id, duration, title, performer).
+    """
+    logger.info("send_audio → chat=%s, file=%s", chat_id, audio_path)
+    try:
+        bot = _get_bot()
+        cid = _resolve_chat_id(chat_id)
+        path = _validate_file(audio_path, "Audio")
+        warning = _check_file_size(path)
+        pm = parse_mode if parse_mode else None
+
+        with open(path, "rb") as f:
+            msg = await bot.send_audio(
+                chat_id=cid,
+                audio=f,
+                caption=caption,
+                parse_mode=pm,
+            )
+
+        result: dict[str, Any] = {
+            "message_id": msg.message_id,
+            "file_id": msg.audio.file_id,
+            "duration": msg.audio.duration,
+            "title": msg.audio.title,
+            "performer": msg.audio.performer,
+            "file_size": msg.audio.file_size,
+        }
+        if warning:
+            result["warning"] = warning
+        return _ok(result)
+    except Exception as e:
+        return await _handle_telegram_error(e)
+
+
+@mcp.tool()
+async def send_voice(
+    voice_path: str,
+    chat_id: str | None = None,
+    caption: str | None = None,
+    parse_mode: str = "HTML",
+) -> str:
+    """Send a voice message to a Telegram chat.
+
+    Voice messages appear as waveform bubbles in the chat. Telegram expects
+    OGG files encoded with OPUS. Other formats may be auto-converted but
+    are not guaranteed to play correctly.
+
+    Args:
+        voice_path: Local path to the voice file (OGG/OPUS preferred).
+        chat_id: Target chat ID. Omit to use DEFAULT_CHAT_ID.
+        caption: Optional caption (supports HTML by default).
+        parse_mode: Formatting for the caption.
+
+    Returns:
+        JSON with voice message details (file_id, duration).
+    """
+    logger.info("send_voice → chat=%s, file=%s", chat_id, voice_path)
+    try:
+        bot = _get_bot()
+        cid = _resolve_chat_id(chat_id)
+        path = _validate_file(voice_path, "Voice")
+        warning = _check_file_size(path)
+        pm = parse_mode if parse_mode else None
+
+        with open(path, "rb") as f:
+            msg = await bot.send_voice(
+                chat_id=cid,
+                voice=f,
+                caption=caption,
+                parse_mode=pm,
+            )
+
+        result: dict[str, Any] = {
+            "message_id": msg.message_id,
+            "file_id": msg.voice.file_id,
+            "duration": msg.voice.duration,
+            "file_size": msg.voice.file_size,
+        }
+        if warning:
+            result["warning"] = warning
+        return _ok(result)
+    except Exception as e:
+        return await _handle_telegram_error(e)
+
+
+@mcp.tool()
+async def send_poll(
+    question: str,
+    options: list[str],
+    chat_id: str | None = None,
+    is_anonymous: bool = True,
+    poll_type: str = "regular",
+    correct_option_id: int | None = None,
+    explanation: str | None = None,
+    allows_multiple_answers: bool = False,
+) -> str:
+    """Send a poll to a Telegram chat.
+
+    Supports both regular polls and quiz-mode polls.
+
+    Args:
+        question: The poll question (1–300 characters).
+        options: List of 2–10 answer options.
+        chat_id: Target chat ID. Omit to use DEFAULT_CHAT_ID.
+        is_anonymous: If True (default), votes are anonymous.
+        poll_type: "regular" (default) for a normal poll, "quiz" for single-correct-answer.
+        correct_option_id: Required for quiz mode — 0-based index of the correct answer.
+        explanation: Optional explanation shown after a quiz answer (supports HTML).
+        allows_multiple_answers: If True, users can select multiple options (regular polls only).
+
+    Returns:
+        JSON with poll details (poll_id, question, options).
+    """
+    logger.info("send_poll → chat=%s, question=%s, type=%s", chat_id, question[:50], poll_type)
+    try:
+        bot = _get_bot()
+        cid = _resolve_chat_id(chat_id)
+
+        if len(options) < 2:
+            raise ValueError("A poll requires at least 2 options.")
+        if len(options) > 10:
+            raise ValueError("A poll supports at most 10 options.")
+        if poll_type == "quiz" and correct_option_id is None:
+            raise ValueError("Quiz polls require correct_option_id (0-based index).")
+
+        kwargs: dict[str, Any] = {
+            "chat_id": cid,
+            "question": question,
+            "options": options,
+            "is_anonymous": is_anonymous,
+            "type": poll_type,
+            "allows_multiple_answers": allows_multiple_answers,
+        }
+        if correct_option_id is not None:
+            kwargs["correct_option_id"] = correct_option_id
+        if explanation:
+            kwargs["explanation"] = explanation
+            kwargs["explanation_parse_mode"] = "HTML"
+
+        msg = await bot.send_poll(**kwargs)
+        return _ok({
+            "message_id": msg.message_id,
+            "poll_id": msg.poll.id,
+            "question": msg.poll.question,
+            "options": [o.text for o in msg.poll.options],
+            "type": msg.poll.type,
+            "is_anonymous": msg.poll.is_anonymous,
         })
     except Exception as e:
         return await _handle_telegram_error(e)
@@ -885,6 +1094,63 @@ async def get_chat_id(query: str) -> str:
             "count": len(matches),
             "matches": matches,
         })
+    except Exception as e:
+        return await _handle_telegram_error(e)
+
+
+@mcp.tool()
+async def get_chat_info(
+    chat_id: str | None = None,
+) -> str:
+    """Get detailed information about a chat, group, or channel.
+
+    Returns comprehensive details including member count, description,
+    permissions, invite link, and the list of administrators.
+
+    Args:
+        chat_id: Chat/group/channel ID to inspect. Omit to use DEFAULT_CHAT_ID.
+
+    Returns:
+        JSON with chat details (title, type, member_count, description, admins).
+    """
+    logger.info("get_chat_info → chat=%s", chat_id)
+    try:
+        bot = _get_bot()
+        cid = _resolve_chat_id(chat_id)
+        chat = await bot.get_chat(chat_id=cid)
+
+        result: dict[str, Any] = {
+            "chat_id": chat.id,
+            "type": chat.type,
+            "title": chat.title or chat.first_name,
+            "username": chat.username,
+            "description": chat.bio or chat.description,
+            "invite_link": chat.invite_link,
+        }
+
+        # Member count (works for groups and channels)
+        try:
+            count = await bot.get_chat_member_count(chat_id=cid)
+            result["member_count"] = count
+        except Exception:
+            result["member_count"] = None
+
+        # Admin list (works for groups and channels)
+        try:
+            admins = await bot.get_chat_administrators(chat_id=cid)
+            result["administrators"] = [
+                {
+                    "user_id": a.user.id,
+                    "name": a.user.full_name,
+                    "username": a.user.username,
+                    "status": a.status,
+                }
+                for a in admins
+            ]
+        except Exception:
+            result["administrators"] = None
+
+        return _ok(result)
     except Exception as e:
         return await _handle_telegram_error(e)
 

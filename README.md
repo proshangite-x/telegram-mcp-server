@@ -8,10 +8,11 @@ A high-performance **Model Context Protocol (MCP)** server that exposes the Tele
 
 | Category | Tools |
 |---|---|
-| **Messaging** | `send_message` · `reply_to_message` · `edit_message` · `delete_message` |
-| **Files & Media** | `send_document` · `send_photo` · `send_video` · `download_file` · `get_file_link` |
+| **Messaging** | `send_message` · `reply_to_message` · `edit_message` · `delete_message` · `forward_message` |
+| **Files & Media** | `send_document` · `send_photo` · `send_video` · `send_audio` · `send_voice` · `download_file` · `get_file_link` |
+| **Interactive** | `send_poll` |
 | **Management** | `create_invite_link` · `kick_member` · `pin_message` |
-| **Information** | `get_me` · `get_updates` · `get_chat_id` |
+| **Information** | `get_me` · `get_updates` · `get_chat_id` · `get_chat_info` |
 
 **Built-in safeguards:**
 - 🔒 HTML parse_mode by default for rich text formatting
@@ -90,6 +91,7 @@ Ask your AI assistant:
 | `reply_to_message(text, message_id, chat_id?, parse_mode?)` | Reply to a specific message. |
 | `edit_message(text, message_id, chat_id?, parse_mode?)` | Edit a bot message. |
 | `delete_message(message_id, chat_id?)` | Delete a message. |
+| `forward_message(from_chat_id, message_id, chat_id?)` | Forward a message from one chat to another. |
 
 ### Files & Media
 
@@ -98,8 +100,16 @@ Ask your AI assistant:
 | `send_document(file_path, chat_id?, caption?, parse_mode?)` | Send any file (validates path & size). |
 | `send_photo(photo_path, chat_id?, caption?, parse_mode?)` | Send an image. |
 | `send_video(video_path, chat_id?, caption?, parse_mode?)` | Send a video. |
+| `send_audio(audio_path, chat_id?, caption?, parse_mode?)` | Send an audio file with built-in player. |
+| `send_voice(voice_path, chat_id?, caption?, parse_mode?)` | Send a voice message (OGG/OPUS). |
 | `download_file(file_id, destination_path)` | Download a Telegram file to PC. |
 | `get_file_link(file_id)` | Get a temporary download URL. |
+
+### Interactive
+
+| Tool | Description |
+|---|---|
+| `send_poll(question, options, chat_id?, is_anonymous?, poll_type?, ...)` | Send a poll or quiz. Supports anonymous voting and multiple answers. |
 
 ### Management
 
@@ -116,6 +126,7 @@ Ask your AI assistant:
 | `get_me()` | Get bot info (username, ID, capabilities). |
 | `get_updates(limit?, offset?)` | Fetch recent incoming messages. |
 | `get_chat_id(query)` | Search for a chat ID by name. |
+| `get_chat_info(chat_id?)` | Get chat details: member count, description, invite link, admin list. |
 
 > **Note:** All `chat_id` parameters are optional if `DEFAULT_CHAT_ID` is set in `.env`.
 
